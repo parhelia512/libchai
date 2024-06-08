@@ -9,6 +9,7 @@ use crate::{
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 pub const MAX_WORD_LENGTH: usize = 10;
@@ -59,17 +60,17 @@ pub struct Assets {
 pub type Element = usize;
 
 /// 字或词的拆分序列
-pub type Sequence = Vec<Element>;
+pub type Sequence = SmallVec<[Element; 4]>;
 
 /// 编码用无符号整数表示
 pub type Code = usize;
 
-///
+/// 编码信息
 #[derive(Clone, Debug, Copy)]
 pub struct CodeInfo {
     pub code: Code,
     pub frequency: u64,
-    pub rank: i8,
+    pub rank: usize,
     pub single: bool,
 }
 
@@ -87,12 +88,13 @@ pub type Label = [u8; 8];
 
 /// 编码是否已被占据
 /// 用一个数组和一个哈希集合来表示，数组用来表示四码以内的编码，哈希集合用来表示四码以上的编码
+#[derive(Debug)]
 pub struct Occupation {
     pub vector: Vec<Slot>,
     pub hashmap: FxHashMap<usize, u8>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Slot {
     pub hash: u16,
     pub count: u8,
@@ -111,26 +113,26 @@ impl Occupation {
     pub fn insert(&mut self, index: usize, hash: u16) {
         if index < self.vector.len() {
             self.vector[index].hash = hash;
-            self.vector[index].count += 1;
+            self.vector[index].count = self.vector[index].count.saturating_add(1);
         } else {
             self.hashmap
                 .insert(index, self.hashmap.get(&index).unwrap_or(&0) + 1);
         }
     }
 
-    pub fn rank(&self, index: usize) -> u8 {
+    pub fn rank(&self, index: usize) -> usize {
         if index < self.vector.len() {
-            self.vector[index].count
+            self.vector[index].count as usize
         } else {
-            *self.hashmap.get(&index).unwrap_or(&0)
+            *self.hashmap.get(&index).unwrap_or(&0) as usize
         }
     }
 
-    pub fn rank_hash(&self, index: usize, hash: u16) -> u8 {
+    pub fn rank_hash(&self, index: usize, hash: u16) -> usize {
         if index < self.vector.len() {
-            self.vector[index].count - (self.vector[index].hash == hash) as u8
+            self.vector[index].count as usize - (self.vector[index].hash == hash) as usize
         } else {
-            *self.hashmap.get(&index).unwrap_or(&0)
+            *self.hashmap.get(&index).unwrap_or(&0) as usize
         }
     }
 }
@@ -143,15 +145,17 @@ pub const MAX_COMBINATION_LENGTH: usize = 4;
 pub struct Entry {
     pub name: String,
     pub full: String,
-    pub full_rank: i8,
+    pub full_rank: usize,
     pub short: String,
-    pub short_rank: i8,
+    pub short_rank: usize,
 }
 
 #[derive(Debug)]
 pub struct Buffer {
     pub full: Codes,
     pub short: Codes,
+    pub full_occupation: Occupation,
+    pub short_occupation: Occupation,
 }
 
 impl Buffer {
@@ -164,8 +168,23 @@ impl Buffer {
         };
         let it = encoder.encodables.iter();
         Self {
+            full_occupation: Occupation::new(encoder.get_space()),
+            short_occupation: Occupation::new(encoder.get_space()),
             full: it.clone().map(make_placeholder).collect(),
             short: it.clone().map(make_placeholder).collect(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.full_occupation.hashmap.clear();
+        self.short_occupation.hashmap.clear();
+        for code in self.full_occupation.vector.iter_mut() {
+            code.count = 0;
+            code.hash = 0;
+        }
+        for code in self.short_occupation.vector.iter_mut() {
+            code.count = 0;
+            code.hash = 0;
         }
     }
 }
@@ -194,7 +213,7 @@ impl Mapped {
     pub fn normalize(&self) -> Vec<MappedKey> {
         match self {
             Mapped::Advanced(vector) => vector.clone(),
-            Mapped::Basic(string) => string.chars().map(|x| MappedKey::Ascii(x)).collect(),
+            Mapped::Basic(string) => string.chars().map(MappedKey::Ascii).collect(),
         }
     }
 }
@@ -203,7 +222,7 @@ pub fn assemble(element: &String, index: usize) -> String {
     if index == 0 {
         element.to_string()
     } else {
-        format!("{}.{}", element.to_string(), index)
+        format!("{}.{}", element, index)
     }
 }
 
@@ -247,12 +266,12 @@ impl Representation {
             .select_keys
             .as_ref()
             .unwrap_or(&default_select_keys);
-        if select_keys.len() < 1 {
+        if select_keys.is_empty() {
             return Err("选择键不能为空！".into());
         }
         let mut parsed_select_keys: Vec<Key> = vec![];
         for key in select_keys {
-            if key_repr.contains_key(&key) {
+            if key_repr.contains_key(key) {
                 return Err("编码键有重复！".into());
             };
             key_repr.insert(*key, index);
@@ -283,7 +302,7 @@ impl Representation {
             let normalized = mapped.normalize();
             for (index, mapped_key) in normalized.iter().enumerate() {
                 if let MappedKey::Ascii(x) = mapped_key {
-                    if let Some(key) = key_repr.get(&x) {
+                    if let Some(key) = key_repr.get(x) {
                         let name = assemble(element, index);
                         forward_converter.insert(name.clone(), keymap.len());
                         reverse_converter.insert(keymap.len(), name.clone());
@@ -368,8 +387,8 @@ impl Representation {
         let mut chars: Vec<char> = Vec::with_capacity(self.config.encoder.max_length);
         let mut remainder = code;
         while remainder > 0 {
-            let k = remainder % self.radix as usize;
-            remainder /= self.radix as usize;
+            let k = remainder % self.radix;
+            remainder /= self.radix;
             if k == 0 {
                 continue;
             }
@@ -553,7 +572,7 @@ impl Representation {
                 for key in keys {
                     let transformed_key = self
                         .key_repr
-                        .get(&key)
+                        .get(key)
                         .ok_or(format!("简码的选择键 {key} 不在全局选择键中"))?;
                     transformed_keys.push(*transformed_key);
                 }
@@ -561,7 +580,7 @@ impl Representation {
             } else {
                 self.select_keys.clone()
             };
-            if count as usize > select_keys.len() {
+            if count > select_keys.len() {
                 return Err("选重数量不能高于选择键数量".into());
             }
             compiled_schemes.push(CompiledScheme {

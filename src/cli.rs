@@ -102,7 +102,7 @@ impl Cli {
             key_distribution,
             pair_equivalence,
         };
-        return (config, elements, assets);
+        (config, elements, assets)
     }
 
     pub fn write_encode_results(entries: Vec<Entry>) {
@@ -121,7 +121,7 @@ impl Cli {
         } in entries
         {
             writer
-                .serialize((&name, &full, &full_rank.abs(), &short, &short_rank.abs()))
+                .serialize((&name, &full, &full_rank, &short, &short_rank))
                 .unwrap();
         }
         writer.flush().unwrap();
@@ -136,7 +136,7 @@ impl Cli {
 
 impl Interface for Cli {
     fn prepare_output(&self) {
-        let _ = fs::create_dir_all("output").expect("should be able to create an output directory");
+        fs::create_dir_all("output").expect("should be able to create an output directory");
     }
 
     fn init_autosolve(&self) {

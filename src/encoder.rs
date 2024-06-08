@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use crate::config::EncoderConfig;
 use crate::error::Error;
 use crate::representation::{
-    Assemble, AssembleList, Assets, AutoSelect, Buffer, Entry, Frequency, Key, KeyMap, Occupation,
+    Assemble, AssembleList, Assets, AutoSelect, Buffer, Entry, Frequency, Key, KeyMap,
     Representation, Sequence, MAX_COMBINATION_LENGTH, MAX_WORD_LENGTH,
 };
 use std::collections::HashSet;
@@ -119,7 +119,8 @@ impl Encoder {
             let sequence = representation.transform_elements(assemble)?;
             let char_frequency = *frequency.get(&name).unwrap_or(&0);
             let frequency = char_frequency * importance / 100;
-            let hash: u16 = name.chars().map(|x| x as u16).sum();
+            let hash: u32 = name.chars().map(|x| x as u32).sum();
+            let hash = hash as u16;
             encodables.push(Encodable {
                 name: name.clone(),
                 length: name.chars().count(),
@@ -168,19 +169,15 @@ impl Encoder {
         Ok(encoder)
     }
 
-    pub fn get_actual_code(&self, code: usize, rank: i8) -> usize {
+    pub fn get_actual_code(&self, code: usize, rank: usize, length: u64) -> usize {
         if rank == 0 && *self.auto_select.get(code).unwrap_or(&true) {
             return code;
         }
-        let length = code.ilog(self.radix) + 1;
-        code + self
-            .select_keys
-            .get(rank.abs() as usize)
-            .unwrap_or(&self.select_keys[0])
-            * self.radix.pow(length)
+        let index = rank.min(self.select_keys.len() - 1);
+        code + self.select_keys[index] * self.radix.pow(length as u32)
     }
 
-    pub fn encode_full(&self, keymap: &KeyMap, buffer: &mut Buffer, occupation: &mut Occupation) {
+    pub fn encode_full(&self, keymap: &KeyMap, buffer: &mut Buffer) {
         for (encodable, pointer) in zip(&self.encodables, &mut buffer.full) {
             let sequence = &encodable.sequence;
             let mut code = 0_usize;
@@ -190,17 +187,12 @@ impl Encoder {
                 weight *= self.radix;
             }
             pointer.code = code;
-            pointer.rank = occupation.rank(code) as i8;
-            occupation.insert(code, encodable.hash);
+            pointer.rank = buffer.full_occupation.rank(code);
+            buffer.full_occupation.insert(code, encodable.hash);
         }
     }
 
-    pub fn encode_short(
-        &self,
-        buffer: &mut Buffer,
-        full_occupation: &Occupation,
-        short_occupation: &mut Occupation,
-    ) {
+    pub fn encode_short(&self, buffer: &mut Buffer) {
         if self.short_code.is_none() {
             return;
         }
@@ -216,14 +208,14 @@ impl Encoder {
             let short = code.code % modulo;
             pointer.code = short;
             pointer.rank = 0;
-            short_occupation.insert(short, encodable.hash);
+            buffer.short_occupation.insert(short, encodable.hash);
         }
         // 常规简码
         for ((code, pointer), encodable) in
             zip(zip(&buffer.full, &mut buffer.short), &self.encodables)
         {
             let schemes = &short_code[encodable.length - 1];
-            if schemes.len() == 0 || encodable.level >= 0 {
+            if schemes.is_empty() || encodable.level >= 0 {
                 continue;
             }
             let full = &code.code;
@@ -241,31 +233,29 @@ impl Encoder {
                 // 首先将全码截取一部分出来
                 let modulo = self.radix.pow(*prefix as u32);
                 let short = full % modulo;
-                let capacity = select_keys.len() as u8;
-                if full_occupation.rank(short) + short_occupation.rank_hash(short, hash) >= capacity
+                let capacity = select_keys.len();
+                if buffer.full_occupation.rank(short) + buffer.short_occupation.rank_hash(short, hash) >= capacity
                 {
                     continue;
                 }
                 pointer.code = short;
-                pointer.rank = short_occupation.rank_hash(short, hash) as i8;
-                short_occupation.insert(short, hash);
+                pointer.rank = buffer.short_occupation.rank_hash(short, hash);
+                buffer.short_occupation.insert(short, hash);
                 has_reduced = true;
                 break;
             }
-            if has_reduced == false {
+            if !has_reduced {
                 pointer.code = *full;
-                pointer.rank = short_occupation.rank_hash(*full, hash) as i8;
-                short_occupation.insert(*full, hash);
+                pointer.rank = buffer.short_occupation.rank_hash(*full, hash);
+                buffer.short_occupation.insert(*full, hash);
             }
         }
     }
 
     pub fn encode(&self, keymap: &KeyMap, representation: &Representation) -> Vec<Entry> {
-        let mut buffer = Buffer::new(&self);
-        let mut full_occupation = Occupation::new(representation.get_space());
-        let mut short_occupation = Occupation::new(representation.get_space());
-        self.encode_full(keymap, &mut buffer, &mut full_occupation);
-        self.encode_short(&mut buffer, &full_occupation, &mut short_occupation);
+        let mut buffer = Buffer::new(self);
+        self.encode_full(keymap, &mut buffer);
+        self.encode_short(&mut buffer);
         let mut entries: Vec<(usize, Entry)> = Vec::new();
         let recover = |code: usize| representation.repr_code(code).iter().collect();
         for (index, encodable) in self.encodables.iter().enumerate() {
