@@ -2,13 +2,21 @@
 
 all: build
 
+%.txt:
+	curl "https://assets.chaifen.app/$@" -o assets/$@
+
+%.yaml:
+	curl "https://assets.chaifen.app/$@" -o assets/$@
+
 assets: assetsdir frequency.txt key_distribution.txt pair_equivalence.txt
 
 assetsdir:
 	mkdir -p assets
 
-%.txt:
-	curl "https://assets.chaifen.app/$@" -o assets/$@
+examples: examplesdir snow.yaml snow.txt mswb.yaml mswb.txt
+
+examplesdir:
+	mkdir -p examples
 
 package: build-macos-arm build-macos-x86 build-windows build-linux-gnu build-linux-musl
 	mkdir -p package; \
