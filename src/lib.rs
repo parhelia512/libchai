@@ -59,7 +59,7 @@ pub struct 键位分布损失函数 {
 pub type 元素 = usize;
 
 /// 可编码对象的序列
-pub type 元素序列 = Vec<(元素, usize)>;
+pub type 元素序列 = [(元素, usize); 8];
 
 /// 元素关系图
 pub type 元素图 = FxHashMap<元素, Vec<元素>>;
@@ -76,9 +76,67 @@ pub struct 可编码对象 {
     pub 词: String,
     pub 词长: usize,
     pub 元素序列: 元素序列,
+    pub 全部元素序列: Vec<(元素序列, 位图)>,
     pub 频率: u64,
     pub 简码长度: u64,
     pub 原始顺序: usize,
+}
+
+// 位图，用于表示元素是否存在，最多支持 1024 个元素
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct 位图 {
+    pub 位图: [u64; 16],
+}
+
+impl 位图 {
+    pub fn new() -> Self {
+        Self { 位图: [0; 16] }
+    }
+
+    pub fn 从元素序列创建(elements: &[(元素, usize)]) -> Self {
+        let mut bitmap = Self::new();
+        for &(element, _) in elements {
+            if element != 0 {
+                bitmap.insert(element);
+            }
+        }
+        bitmap
+    }
+
+    pub fn insert(&mut self, i: usize) {
+        let (block, bit) = (i / 64, i % 64);
+        self.位图[block] |= 1 << bit;
+    }
+
+    pub fn remove(&mut self, i: usize) {
+        let (block, bit) = (i / 64, i % 64);
+        self.位图[block] &= !(1 << bit);
+    }
+
+    pub fn subset(&self, other: &Self) -> bool {
+        for i in 0..16 {
+            if self.位图[i] & !other.位图[i] != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn union(&self, other: &Self) -> Self {
+        let mut result = Self::new();
+        for i in 0..16 {
+            result.位图[i] = self.位图[i] | other.位图[i];
+        }
+        result
+    }
+
+    pub fn intersection(&self, other: &Self) -> Self {
+        let mut result = Self::new();
+        for i in 0..16 {
+            result.位图[i] = self.位图[i] & other.位图[i];
+        }
+        result
+    }
 }
 
 /// 全码或简码的编码信息
@@ -190,77 +248,93 @@ impl 棱镜 {
         chars
     }
 
+    pub fn 预处理元素序列(
+        &self,
+        词: &String,
+        原始元素序列字符串: &String,
+        最大码长: usize,
+    ) -> Result<元素序列, 错误> {
+        let 原始元素序列: Vec<_> = 原始元素序列字符串.split(' ').collect();
+        let mut 元素序列 = 元素序列::default();
+        let length = 原始元素序列.len();
+        if length > 最大码长 {
+            return Err(format!(
+                "编码对象「{词}」包含的元素数量为 {length}，超过了最大码长 {最大码长}"
+            )
+            .into());
+        }
+        for (i, &原始元素) in 原始元素序列.iter().enumerate() {
+            let (元素, 位置) = if 原始元素.contains(".") {
+                let parts: Vec<_> = 原始元素.split('.').collect();
+                if parts.len() != 2 {
+                    return Err(
+                        format!("编码对象「{词}」包含的元素「{原始元素}」格式不正确").into(),
+                    );
+                }
+                let 元素名称 = parts[0];
+                let index: usize = match parts[1].parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return Err(
+                            format!("编码对象「{词}」包含的元素「{原始元素}」格式不正确").into(),
+                        );
+                    }
+                };
+                if let Some(元素) = self.元素转数字.get(元素名称) {
+                    (*元素, index)
+                } else {
+                    return Err(format!(
+                        "编码对象「{词}」包含的元素「{原始元素}」无法在键盘映射中找到"
+                    )
+                    .into());
+                }
+            } else {
+                let 元素名称 = 原始元素;
+                if let Some(元素) = self.元素转数字.get(元素名称) {
+                    (*元素, 0)
+                } else {
+                    return Err(format!(
+                        "编码对象「{词}」包含的元素「{原始元素}」无法在键盘映射中找到"
+                    )
+                    .into());
+                }
+            };
+            元素序列[i] = (元素, 位置);
+        }
+        return Ok(元素序列);
+    }
+
     pub fn 预处理词列表(
         &self,
         原始词列表: Vec<原始可编码对象>,
         最大码长: usize,
     ) -> Result<Vec<可编码对象>, 错误> {
-        let mut 词列表 = Vec::new();
+        let mut 词列表 = vec![];
         for (原始顺序, 原始可编码对象) in 原始词列表.into_iter().enumerate() {
             let 原始可编码对象 {
-                词: name,
-                频率: frequency,
-                元素序列: sequence,
-                简码长度: level,
-            } = 原始可编码对象;
-            let 原始元素序列: Vec<_> = sequence.split(' ').collect();
-            let mut 元素序列 = 元素序列::new();
-            let length = 原始元素序列.len();
-            if length > 最大码长 {
-                return Err(format!(
-                    "编码对象「{name}」包含的元素数量为 {length}，超过了最大码长 {最大码长}"
-                )
-                .into());
-            }
-            for 原始元素 in 原始元素序列 {
-                let (元素, 位置) = if 原始元素.contains(".") {
-                    let parts: Vec<&str> = 原始元素.split('.').collect();
-                    if parts.len() != 2 {
-                        return Err(format!(
-                            "编码对象「{name}」包含的元素「{原始元素}」格式不正确"
-                        )
-                        .into());
-                    }
-                    let 元素名称 = parts[0];
-                    let index: usize = match parts[1].parse() {
-                        Ok(v) => v,
-                        Err(_) => {
-                            return Err(format!(
-                                "编码对象「{name}」包含的元素「{原始元素}」格式不正确"
-                            )
-                            .into());
-                        }
-                    };
-                    if let Some(元素) = self.元素转数字.get(元素名称) {
-                        元素序列.push((*元素, index));
-                    } else {
-                        return Err(format!(
-                            "编码对象「{name}」包含的元素「{原始元素}」无法在键盘映射中找到"
-                        )
-                        .into());
-                    }
-                    continue;
-                } else {
-                    let 元素名称 = 原始元素;
-                    if let Some(元素) = self.元素转数字.get(元素名称) {
-                        (*元素, 0)
-                    } else {
-                        return Err(format!(
-                            "编码对象「{name}」包含的元素「{原始元素}」无法在键盘映射中找到"
-                        )
-                        .into());
-                    }
-                };
-                元素序列.push((元素, 位置));
-            }
-            词列表.push(可编码对象 {
-                词: name.clone(),
-                词长: name.chars().count(),
-                频率: frequency,
-                简码长度: level,
+                词,
+                频率,
                 元素序列,
+                简码长度,
+            } = 原始可编码对象;
+            let mut 全部元素序列 = vec![];
+            // 用全角空格分隔
+            for 原始元素序列字符串 in 元素序列.split('　') {
+                let 元素序列 =
+                    self.预处理元素序列(&词, &原始元素序列字符串.to_string(), 最大码长)?;
+                let 位图 = 位图::从元素序列创建(&元素序列);
+                全部元素序列.push((元素序列, 位图));
+            }
+            let c = 可编码对象 {
+                词: 词.clone(),
+                词长: 词.chars().count(),
+                频率,
+                简码长度,
+                元素序列: 全部元素序列[0].0,
+                全部元素序列,
                 原始顺序,
-            });
+            };
+            词列表.push(c);
         }
         词列表.sort_by_key(|x| Reverse(x.频率));
         Ok(词列表)

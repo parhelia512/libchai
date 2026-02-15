@@ -1,6 +1,6 @@
 //! 数据结构的定义
 
-use crate::config::{安排, 广义码位, 简码模式, 简码规则, 安排描述, 配置};
+use crate::config::{安排, 安排描述, 广义码位, 简码模式, 简码规则, 配置};
 use crate::contexts::{
     上下文, 合并初始决策, 展开变量, 应用生成器, 拓扑排序, 条件, 条件安排
 };
@@ -8,12 +8,11 @@ use crate::encoders::default::简码数量;
 use crate::interfaces::默认输入;
 use crate::optimizers::决策;
 use crate::{
-    元素, 元素图, 可编码对象, 当量信息, 最大按键组合长度, 最大词长, 棱镜, 码表项, 编码, 编码信息,
-    键, 键位分布信息,
+    元素, 元素图, 原始当量信息, 原始键位分布信息, 可编码对象, 最大按键组合长度, 最大词长, 棱镜,
+    码表项, 编码, 编码信息, 键,
 };
 use crate::{最大元素编码长度, 错误};
 use indexmap::IndexMap;
-use itertools::Itertools;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde_yaml::to_string;
@@ -23,8 +22,8 @@ use serde_yaml::to_string;
 pub struct 默认上下文 {
     pub 配置: 配置,
     pub 词列表: Vec<可编码对象>,
-    pub 键位分布信息: 键位分布信息,
-    pub 当量信息: 当量信息,
+    pub 键位分布信息: 原始键位分布信息,
+    pub 当量信息: 原始当量信息,
     pub 初始决策: 默认决策,
     pub 决策空间: 默认决策空间,
     pub 棱镜: 棱镜,
@@ -32,7 +31,7 @@ pub struct 默认上下文 {
     pub 元素图: 元素图,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum 默认安排 {
     键位([(元素, usize); 最大元素编码长度]),
     归并(元素),
@@ -138,16 +137,49 @@ impl 默认决策 {
     }
 }
 
-impl 决策 for 默认决策 {
-    type 变化 = Vec<元素>;
+#[derive(Debug, Clone)]
+pub struct 默认决策变化 {
+    pub 增加元素: Vec<元素>,
+    pub 减少元素: Vec<元素>,
+    pub 移动元素: Vec<元素>,
+}
 
+impl 默认决策变化 {
+    pub fn 新建(
+        增加元素: Vec<元素>, 减少元素: Vec<元素>, 移动元素: Vec<元素>
+    ) -> Self {
+        Self {
+            增加元素,
+            减少元素,
+            移动元素,
+        }
+    }
+
+    pub fn 不变() -> Self {
+        Self::新建(vec![], vec![], vec![])
+    }
+}
+
+impl 决策 for 默认决策 {
+    type 变化 = 默认决策变化;
     fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化 {
-        旧变化
-            .iter()
-            .chain(新变化.iter())
-            .unique()
-            .cloned()
-            .collect()
+        let mut res = 新变化.clone();
+        for 元素 in &旧变化.增加元素 {
+            if !res.减少元素.contains(元素) {
+                res.减少元素.push(*元素);
+            }
+        }
+        for 元素 in &旧变化.减少元素 {
+            if !res.增加元素.contains(元素) {
+                res.增加元素.push(*元素);
+            }
+        }
+        for 元素 in &旧变化.移动元素 {
+            if !res.移动元素.contains(元素) {
+                res.移动元素.push(*元素);
+            }
+        }
+        res
     }
 }
 
@@ -160,11 +192,18 @@ impl 上下文 for 默认上下文 {
     type 决策 = 默认决策;
     fn 序列化(&self, 决策: &Self::决策) -> String {
         let mut 新配置 = self.配置.clone();
-        for (元素名称, 安排) in 新配置.form.mapping.iter_mut() {
-            let 元素 = self.棱镜.元素转数字[元素名称];
-            let 新安排 = 决策.元素[元素].to(&self.棱镜);
-            *安排 = 新安排;
+        let mut mapping = IndexMap::new();
+        for (i, 安排) in 决策.元素.iter().enumerate() {
+            if i < self.棱镜.进制 as usize {
+                continue;
+            }
+            let 元素名称 = self.棱镜.数字转元素[&i].clone();
+            let mapped = 安排.to(&self.棱镜);
+            if mapped != 安排::Unused(()) {
+                mapping.insert(元素名称, mapped);
+            }
         }
+        新配置.form.mapping = mapping;
         to_string(&新配置).unwrap()
     }
 }
@@ -175,15 +214,11 @@ impl 默认上下文 {
             Self::构建棱镜和初始决策(&输入.配置)?;
         let 最大码长 = 输入.配置.encoder.max_length;
         let 词列表 = 棱镜.预处理词列表(输入.词列表, 最大码长)?;
-        let 组合长度 = 最大码长.min(最大按键组合长度);
-        let 编码空间大小 = 棱镜.进制.pow(组合长度 as u32) as usize;
-        let 键位分布信息 = 棱镜.预处理键位分布信息(&输入.原始键位分布信息);
-        let 当量信息 = 棱镜.预处理当量信息(&输入.原始当量信息, 编码空间大小);
         Ok(Self {
             配置: 输入.配置,
             词列表,
-            键位分布信息,
-            当量信息,
+            键位分布信息: 输入.原始键位分布信息.clone(),
+            当量信息: 输入.原始当量信息.clone(),
             初始决策,
             棱镜,
             选择键,
@@ -339,7 +374,7 @@ impl 默认上下文 {
                 return Err(format!("正则表达式 {pattern} 无法解析").into());
             }
         }
-        for code in 0..self.get_space() {
+        for code in 0..self.线性表长度() {
             let chars = self.棱镜.数字转编码(code as u64);
             let string: String = chars.iter().collect();
             let is_matched = if let Some(re) = &re {
@@ -414,8 +449,8 @@ impl 默认上下文 {
         Ok(short_code)
     }
 
-    pub fn get_space(&self) -> usize {
-        let max_length = self.配置.encoder.max_length.min(最大按键组合长度);
-        self.棱镜.进制.pow(max_length as u32) as usize
+    pub fn 线性表长度(&self) -> usize {
+        let 组合长度 = self.配置.encoder.max_length.min(最大按键组合长度);
+        self.棱镜.进制.pow(组合长度 as u32) as usize
     }
 }

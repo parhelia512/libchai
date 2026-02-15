@@ -4,10 +4,10 @@ use super::cache::缓存;
 use super::metric::默认指标;
 use super::目标函数;
 use crate::config::部分权重;
-use crate::contexts::default::{默认上下文, 默认决策, 默认决策空间};
+use crate::contexts::default::{默认上下文, 默认决策, 默认决策变化, 默认决策空间};
 use crate::encoders::编码器;
 use crate::错误;
-use crate::{元素, 指法向量, 编码信息, 键位分布损失函数};
+use crate::{指法向量, 编码信息, 键位分布损失函数};
 
 #[derive(Clone)]
 pub struct 默认目标函数<E: 编码器> {
@@ -46,9 +46,10 @@ impl PartialType {
 impl<E: 编码器<决策 = 默认决策>> 默认目标函数<E> {
     /// 通过传入配置表示、编码器和共用资源来构造一个目标函数
     pub fn 新建(上下文: &默认上下文, 编码器: E) -> Result<Self, 错误> {
-        let 键位分布信息 = 上下文.键位分布信息.clone();
-        let 当量信息 = 上下文.当量信息.clone();
-        let 指法计数 = 上下文.棱镜.预处理指法标记(上下文.get_space());
+        let 键位分布信息 = 上下文.棱镜.预处理键位分布信息(&上下文.键位分布信息);
+        let 线性表长度 = 上下文.线性表长度();
+        let 当量信息 = 上下文.棱镜.预处理当量信息(&上下文.当量信息, 线性表长度);
+        let 指法计数 = 上下文.棱镜.预处理指法标记(线性表长度);
         let config = 上下文
             .配置
             .optimization
@@ -104,10 +105,10 @@ impl<E: 编码器<决策 = 默认决策>> 目标函数 for 默认目标函数<E>
 
     /// 计算各个部分编码的指标，然后将它们合并成一个指标输出
     fn 计算(
-        &mut self, 决策: &默认决策, 变化: &Option<Vec<元素>>
+        &mut self, 决策: &默认决策, 决策变化: &Option<默认决策变化>
     ) -> (默认指标, f64) {
         let 参数 = &self.参数;
-        self.编码器.编码(决策, 变化, &mut self.编码结果);
+        self.编码器.编码(决策, 决策变化, &mut self.编码结果);
         let mut 桶序号列表: Vec<_> = self.计数桶列表.iter().map(|_| 0).collect();
         // 开始计算指标
         for 编码信息 in self.编码结果.iter_mut() {

@@ -36,7 +36,7 @@ fn 计时(上下文: 默认上下文, 名称: &str, b: &mut Criterion) -> Result
     b.bench_function(名称, |b| {
         b.iter(|| {
             let mut 决策 = 上下文.初始决策.clone();
-            let 决策变化 = 操作.随机移动(&mut 决策);
+            let 决策变化 = 操作.随机移动元素(&mut 决策);
             目标函数.计算(&决策, &Some(决策变化));
         })
     });

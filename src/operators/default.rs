@@ -1,8 +1,10 @@
 use super::变异;
-use crate::contexts::default::{默认上下文, 默认决策, 默认决策空间};
+use crate::contexts::default::{
+    默认上下文, 默认决策, 默认决策变化, 默认决策空间, 默认安排
+};
 use crate::optimizers::决策;
+use crate::元素图;
 use crate::错误;
-use crate::{元素, 元素图};
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{random_range, rng};
 use serde::{Deserialize, Serialize};
@@ -31,7 +33,7 @@ pub const DEFAULT_MUTATE: 变异配置 = 变异配置 {
 impl 变异 for 默认操作 {
     type 决策 = 默认决策;
     fn 变异(&mut self, 决策: &mut Self::决策) -> <默认决策 as 决策>::变化 {
-        let mut 变化 = self.随机移动(决策);
+        let mut 变化 = self.随机移动元素(决策);
         self.传播(&mut 变化, 决策);
         变化
     }
@@ -49,7 +51,12 @@ impl 默认操作 {
     fn 传播(&self, 变化: &mut <默认决策 as 决策>::变化, 决策: &mut 默认决策) {
         // 初始化队列
         let mut 队列 = VecDeque::new();
-        for 元素 in 变化.iter() {
+        for 元素 in 变化
+            .增加元素
+            .iter()
+            .chain(变化.减少元素.iter())
+            .chain(变化.移动元素.iter())
+        {
             for 下游元素 in self.元素图.get(元素).unwrap_or(&vec![]) {
                 if !队列.contains(下游元素) {
                     队列.push_back(下游元素.clone());
@@ -64,11 +71,12 @@ impl 默认操作 {
                 panic!("传播超过 100 次仍未结束，可能出现死循环");
             }
             let 元素 = 队列.pop_front().unwrap();
+            let 当前安排 = 决策.元素[元素];
             let mut 合法 = false;
             let mut 新安排列表 = vec![];
             for 条件安排 in &self.决策空间.元素[元素] {
                 if 决策.允许(条件安排) {
-                    if 条件安排.安排 == 决策.元素[元素] {
+                    if 条件安排.安排 == 当前安排 {
                         合法 = true;
                         break;
                     }
@@ -79,29 +87,36 @@ impl 默认操作 {
                 if 新安排列表.is_empty() {
                     panic!("没有合法的安排，传播失败");
                 } else {
-                    let 新安排 = 新安排列表.choose(&mut rng()).unwrap();
-                    变化.push(元素);
-                    决策.元素[元素] = 新安排.clone();
+                    let 新安排 = *新安排列表.choose(&mut rng()).unwrap();
+                    if let 默认安排::未选取 = 当前安排 {
+                        变化.增加元素.push(元素);
+                    } else if let 默认安排::未选取 = 新安排 {
+                        变化.减少元素.push(元素);
+                    } else {
+                        变化.移动元素.push(元素);
+                    }
+                    决策.元素[元素] = 新安排;
                 }
             }
             for 下游元素 in self.元素图.get(&元素).unwrap_or(&vec![]) {
                 if !队列.contains(下游元素) {
-                    队列.push_back(下游元素.clone());
+                    队列.push_back(*下游元素);
                 }
             }
         }
     }
 
-    pub fn 随机移动(&self, 决策: &mut 默认决策) -> Vec<元素> {
+    pub fn 随机移动元素(&self, 决策: &mut 默认决策) -> 默认决策变化 {
         let mut rng = rng();
         const MAX_TRIES: usize = 100;
         for _ in 0..MAX_TRIES {
             let 元素 = (0..决策.元素.len()).choose(&mut rng).unwrap();
+            let 当前安排 = 决策.元素[元素];
             // 蓄水池抽样
             let mut 下一个安排 = None;
             let mut count = 0;
             for 条件安排 in &self.决策空间.元素[元素] {
-                if &条件安排.安排 != &决策.元素[元素] && 决策.允许(条件安排) {
+                if 条件安排.安排 != 当前安排 && 决策.允许(条件安排) {
                     count += 1;
                     if random_range(0..count) == 0 {
                         下一个安排 = Some(&条件安排.安排);
@@ -109,10 +124,20 @@ impl 默认操作 {
                 }
             }
             if let Some(下一个安排) = 下一个安排 {
-                决策.元素[元素] = 下一个安排.clone();
-                return vec![元素];
+                决策.元素[元素] = *下一个安排;
+                let mut 增加元素 = vec![];
+                let mut 减少元素 = vec![];
+                let mut 移动元素 = vec![];
+                if let 默认安排::未选取 = 当前安排 {
+                    增加元素.push(元素);
+                } else if let 默认安排::未选取 = 下一个安排 {
+                    减少元素.push(元素);
+                } else {
+                    移动元素.push(元素);
+                }
+                return 默认决策变化::新建(增加元素, 减少元素, 移动元素);
             }
         }
-        vec![]
+        默认决策变化::不变()
     }
 }
