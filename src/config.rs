@@ -23,9 +23,9 @@ pub struct 基本信息 {
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 数据配置 {
+    pub character_set: Option<String>,
     pub repertoire: Option<原始字库>,
     pub glyph_customization: Option<IndexMap<String, 字形>>,
-    pub tags: Option<Vec<String>>,
     pub transformers: Option<Vec<变换器>>,
 }
 
@@ -118,6 +118,10 @@ pub enum 字形 {
         order: Option<Vec<笔画块>>,
         parameters: Option<复合体参数>,
     },
+    Identity {
+        tags: Option<Vec<String>>,
+        source: String,
+    },
 }
 
 #[skip_serializing_none]
@@ -152,6 +156,7 @@ pub struct 分析配置 {
     pub weak: Option<Vec<String>>,
     pub component_analyzer: Option<String>,
     pub compound_analyzer: Option<String>,
+    pub dynamic: Option<bool>,
 }
 
 #[skip_serializing_none]
