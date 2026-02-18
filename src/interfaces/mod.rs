@@ -28,9 +28,11 @@ pub enum 消息 {
         steps: usize,
         temperature: f64,
         metric: String,
+        score: f64,
     },
     BetterSolution {
         metric: String,
+        score: f64,
         config: String,
         save: bool,
     },

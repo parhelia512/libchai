@@ -3,17 +3,19 @@ use crate::contexts::default::{
     默认上下文, 默认决策, 默认决策变化, 默认决策空间, 默认安排
 };
 use crate::optimizers::决策;
-use crate::元素图;
 use crate::错误;
+use crate::{元素图, 棱镜};
 use rand::seq::{IndexedRandom, IteratorRandom};
 use rand::{random_range, rng};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::VecDeque;
+use tracing::debug;
 
 pub struct 默认操作 {
     决策空间: 默认决策空间,
     元素图: 元素图,
+    棱镜: 棱镜,
 }
 
 #[skip_serializing_none]
@@ -45,6 +47,7 @@ impl 默认操作 {
         Ok(Self {
             决策空间: 上下文.决策空间.clone(),
             元素图: 上下文.元素图.clone(),
+            棱镜: 上下文.棱镜.clone(),
         })
     }
 
@@ -125,6 +128,10 @@ impl 默认操作 {
             }
             if let Some(下一个安排) = 下一个安排 {
                 决策.元素[元素] = *下一个安排;
+                debug!(
+                    "随机移动元素 {:?} 从 {:?} 到 {:?}",
+                    self.棱镜.数字转元素[&元素], 当前安排, 下一个安排
+                );
                 let mut 增加元素 = vec![];
                 let mut 减少元素 = vec![];
                 let mut 移动元素 = vec![];

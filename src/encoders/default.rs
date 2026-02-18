@@ -1,8 +1,10 @@
 use super::编码器;
 use crate::contexts::default::{默认上下文, 默认决策, 默认决策变化, 默认安排};
-use crate::{位图, 可编码对象, 最大词长, 编码, 编码信息, 自动上屏, 键};
+use crate::{
+    位图, 元素, 可编码对象, 最大词长, 编码, 编码信息, 自动上屏, 键
+};
 use crate::{最大元素编码长度, 棱镜, 错误};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::iter::zip;
 
 pub type 线性化决策 = Vec<[键; 最大元素编码长度]>;
@@ -132,9 +134,15 @@ impl 默认编码器 {
             包含元素的词.push(vec![]);
         }
         for (词序号, 词) in 词信息.iter().enumerate() {
-            for (元素, _) in &词.元素序列 {
-                if *元素 != 0 {
-                    包含元素的词[*元素].push(词序号);
+            let mut 词元素集合 = FxHashSet::default();
+            for (元素序列, _) in &词.全部元素序列 {
+                for (元素, _) in 元素序列 {
+                    词元素集合.insert(*元素);
+                }
+            }
+            for 元素 in 词元素集合 {
+                if 元素 != 0 {
+                    包含元素的词[元素].push(词序号);
                 }
             }
         }
@@ -180,14 +188,14 @@ impl 默认编码器 {
     fn 输出全码(
         &mut self,
         映射: &线性化决策,
-        决策变化: &Option<默认决策变化>,
+        纯移动元素: &Option<Vec<元素>>,
         编码结果: &mut [编码信息],
     ) {
         let 编码配置 = &self.编码配置;
-        // 根据移动的元素更新编码结果，如果没有移动的元素则直接全部生成
-        if let Some(变化) = 决策变化 {
-            let 移动的元素 = &变化.移动元素;
-            for 元素 in 移动的元素 {
+        // 如果只有移动的元素，则根据移动的元素更新编码结果；
+        // 其他情况，全部生成
+        if let Some(纯移动元素) = 纯移动元素 {
+            for 元素 in 纯移动元素 {
                 for 索引 in &self.包含元素的词[*元素] {
                     let 词 = &self.词信息[*索引];
                     let 全码信息 = &mut 编码结果[*索引].全码;
@@ -321,17 +329,22 @@ impl 编码器 for 默认编码器 {
     fn 编码(
         &mut self, 决策: &默认决策, 决策变化: &Option<默认决策变化>, 输出: &mut [编码信息]
     ) {
+        self.重置();
         let 线性化决策 = self.线性化(决策, &self.棱镜);
-        let 是否刷新元素序列表 = if let Some(变化) = 决策变化 {
-            !变化.增加元素.is_empty() || !变化.减少元素.is_empty()
+        let 纯移动字根 = if let Some(变化) = 决策变化 {
+            if 变化.增加元素.is_empty() && 变化.减少元素.is_empty() {
+                Some(变化.移动元素.clone())
+            } else {
+                None
+            }
         } else {
-            true
+            None
         };
-        if 是否刷新元素序列表 {
+        if let Some(_) = 纯移动字根 {
+        } else {
             self.刷新元素序列表(&线性化决策);
         }
-        self.重置();
-        self.输出全码(&线性化决策, 决策变化, 输出);
+        self.输出全码(&线性化决策, &None, 输出);
         if self.编码配置.简码配置列表.is_none()
             || self.编码配置.简码配置列表.as_ref().unwrap().is_empty()
         {

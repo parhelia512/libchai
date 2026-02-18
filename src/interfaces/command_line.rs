@@ -131,9 +131,9 @@ impl<P: 命令行参数> 命令行<P> {
         println!("已完成编码，结果保存在 {} 中", path.clone().display());
     }
 
-    pub fn 输出评测指标<M: Display + Serialize>(&self, metric: M) {
+    pub fn 输出评测指标<M: Display + Serialize>(&self, metric: M, score: f64) {
         let path = self.输出目录.join("评测指标.yaml");
-        print!("{metric}");
+        print!("分数：{score:.4e}；指标：{metric}");
         let metric_str = serde_yaml::to_string(&metric).unwrap();
         write(&path, metric_str).unwrap();
     }
@@ -214,12 +214,14 @@ impl<P: 命令行参数> 界面 for 命令行<P> {
                 steps,
                 temperature,
                 metric,
+                score,
             } => writeln!(
                 &mut writer,
-                "已执行 {steps} 步，当前温度为 {temperature:.2e}，当前评测指标如下：\n{metric}",
+                "已执行 {steps} 步，当前温度为 {temperature:.2e}，当前目标函数值为 {score:.4e}，当前评测指标如下：\n{metric}",
             ),
             消息::BetterSolution {
                 metric,
+                score,
                 config,
                 save,
             } => {
@@ -232,13 +234,13 @@ impl<P: 命令行参数> 界面 for 命令行<P> {
                     write(配置路径, config).unwrap();
                     writeln!(
                         &mut writer,
-                        "方案文件保存于 {时间戳}.yaml 中，评测指标保存于 {时间戳}.metric.yaml 中",
+                        "方案文件保存于 {时间戳}.yaml 中，目标函数值为 {score:.4e}，评测指标保存于 {时间戳}.metric.yaml 中",
                     )
                     .unwrap();
                 }
                 writeln!(
                     &mut writer,
-                    "{} 系统搜索到了一个更好的方案，评测指标如下：\n{}",
+                    "{} 系统搜索到了一个更好的方案，目标函数值为 {score:.4e}，评测指标如下：\n{}",
                     时刻.format("%H:%M:%S"),
                     metric
                 )

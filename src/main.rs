@@ -11,16 +11,15 @@ use clap::Parser;
 use std::thread::spawn;
 
 fn main() -> Result<(), 错误> {
+    tracing_subscriber::fmt().init();
     let 参数 = 默认命令行参数::parse();
 
     match 参数.command {
         命令::Server { port } => {
             // 只在 Server 模式下使用异步运行时
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async {
-                    chai::server::start_server(port).await.unwrap();
-                });
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                chai::server::start_server(port).await.unwrap();
+            });
         }
         命令::Encode { data } => {
             // 重构参数结构，以便复用现有的数据加载逻辑
@@ -32,10 +31,10 @@ fn main() -> Result<(), 错误> {
             let 上下文 = 默认上下文::新建(输入)?;
             let 编码器 = 默认编码器::新建(&上下文)?;
             let mut 目标函数 = 默认目标函数::新建(&上下文, 编码器)?;
-            let (指标, _) = 目标函数.计算(&上下文.初始决策, &None);
+            let (指标, 目标函数值) = 目标函数.计算(&上下文.初始决策, &None);
             let 码表 = 上下文.生成码表(&目标函数.编码结果);
             命令行.输出编码结果(码表);
-            命令行.输出评测指标(指标);
+            命令行.输出评测指标(指标, 目标函数值);
         }
         命令::Optimize { data, threads } => {
             let 重构参数 = 默认命令行参数 {
@@ -64,13 +63,16 @@ fn main() -> Result<(), 错误> {
                 let 子命令行 = 命令行.生成子命令行(线程序号);
                 let _上下文 = 上下文.clone();
                 let 线程 = spawn(move || {
-                    优化方法.优化(
+                    let 优化结果 = 优化方法.优化(
                         &_上下文.初始决策,
                         &mut 目标函数,
                         &mut 操作,
                         &_上下文,
                         &子命令行,
-                    )
+                    );
+                    let 码表 = _上下文.生成码表(&目标函数.编码结果);
+                    子命令行.输出编码结果(码表);
+                    return 优化结果;
                 });
                 线程池.push((线程序号, 线程));
             }
@@ -80,7 +82,10 @@ fn main() -> Result<(), 错误> {
             }
             优化结果列表.sort_by(|a, b| a.1.分数.partial_cmp(&b.1.分数).unwrap());
             for (线程序号, 优化结果) in 优化结果列表 {
-                print!("线程{}：{}", 线程序号, 优化结果.指标);
+                print!(
+                    "线程 {} 分数：{:.4e}；指标：{}",
+                    线程序号, 优化结果.分数, 优化结果.指标
+                );
             }
         }
     }

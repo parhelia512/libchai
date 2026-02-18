@@ -75,6 +75,7 @@ impl 退火方法 {
                     steps: 步骤,
                     temperature: 温度,
                     metric: format!("{}", 当前指标.0),
+                    score: 当前指标.1,
                 });
                 if 步骤 == 更新频率 {
                     let elapsed = 开始时间.elapsed().as_micros() as u64 / 更新频率 as u64;
@@ -106,6 +107,7 @@ impl 退火方法 {
                 let 是否保存 = 进度 > self.report_after.unwrap_or(0.9);
                 界面.发送(消息::BetterSolution {
                     metric: format!("{}", 最优指标.0),
+                    score: 最优指标.1,
                     config: 上下文.序列化(&最优决策),
                     save: 是否保存,
                 })
@@ -113,6 +115,7 @@ impl 退火方法 {
         }
         界面.发送(消息::BetterSolution {
             metric: format!("{}", 最优指标.0),
+            score: 最优指标.1,
             config: 上下文.序列化(&最优决策),
             save: true,
         });

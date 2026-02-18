@@ -163,21 +163,19 @@ impl 默认决策变化 {
 impl 决策 for 默认决策 {
     type 变化 = 默认决策变化;
     fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化 {
-        let mut res = 新变化.clone();
-        for 元素 in &旧变化.增加元素 {
-            if !res.减少元素.contains(元素) {
-                res.减少元素.push(*元素);
-            }
+        let mut res = 默认决策变化 {
+            增加元素: 旧变化.减少元素.clone(),
+            减少元素: 旧变化.增加元素.clone(),
+            移动元素: 旧变化.移动元素.clone(),
+        };
+        for 元素 in &新变化.增加元素 {
+            res.增加元素.push(*元素);
         }
-        for 元素 in &旧变化.减少元素 {
-            if !res.增加元素.contains(元素) {
-                res.增加元素.push(*元素);
-            }
+        for 元素 in &新变化.减少元素 {
+            res.减少元素.push(*元素);
         }
-        for 元素 in &旧变化.移动元素 {
-            if !res.移动元素.contains(元素) {
-                res.移动元素.push(*元素);
-            }
+        for 元素 in &新变化.移动元素 {
+            res.移动元素.push(*元素);
         }
         res
     }
