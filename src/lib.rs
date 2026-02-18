@@ -58,8 +58,17 @@ pub struct 键位分布损失函数 {
 /// 元素用一个无符号整数表示
 pub type 元素 = usize;
 
+/// 元素位 = 元素 + 位置 * 元素总数，位置从 0 开始，元素总数由棱镜决定。这样设计的好处是可以把元素和位置的信息都编码在一个整数中，方便处理和比较。
+pub type 元素位 = usize;
+
+/// 最大元素序列长度，超过这个长度的编码会被拒绝
+pub const 最大元素序列长度: usize = 8;
+
+/// 最大元素数量，超过这个数量的元素会被拒绝
+pub const 最大元素数量: usize = 1024;
+
 /// 可编码对象的序列
-pub type 元素序列 = [(元素, usize); 8];
+pub type 元素序列 = [元素位; 最大元素序列长度];
 
 /// 元素关系图
 pub type 元素图 = FxHashMap<元素, Vec<元素>>;
@@ -93,11 +102,12 @@ impl 位图 {
         Self { 位图: [0; 16] }
     }
 
-    pub fn 从元素序列创建(elements: &[(元素, usize)]) -> Self {
+    pub fn 从元素序列创建(元素序列: &[元素位], 棱镜: &棱镜) -> Self {
         let mut bitmap = Self::new();
-        for &(element, _) in elements {
-            if element != 0 {
-                bitmap.insert(element);
+        for 元素位 in 元素序列 {
+            let 元素 = *元素位 % 棱镜.元素总数(); // 取模得到元素编号，位置不影响位图
+            if 元素 != 0 {
+                bitmap.insert(元素);
             }
         }
         bitmap
@@ -232,6 +242,10 @@ pub struct 棱镜 {
 }
 
 impl 棱镜 {
+    pub fn 元素总数(&self) -> usize {
+        self.元素转数字.len() + 1 // 加上 0 这个特殊元素
+    }
+
     /// 如前所述，建立了一个按键到整数的映射之后，可以将字符串看成具有某个进制的数。所以，给定一个数，也可以把它转化为字符串
     pub fn 数字转编码(&self, code: 编码) -> Vec<char> {
         let mut chars = Vec::new();
@@ -256,10 +270,10 @@ impl 棱镜 {
     ) -> Result<元素序列, 错误> {
         let 原始元素序列: Vec<_> = 原始元素序列字符串.split(' ').collect();
         let mut 元素序列 = 元素序列::default();
-        let length = 原始元素序列.len();
-        if length > 最大码长 {
+        let 原始元素序列长度 = 原始元素序列.len();
+        if 原始元素序列长度 > 最大码长 {
             return Err(format!(
-                "编码对象「{词}」包含的元素数量为 {length}，超过了最大码长 {最大码长}"
+                "编码对象「{词}」包含的元素数量为 {原始元素序列长度}，超过了最大码长 {最大码长}"
             )
             .into());
         }
@@ -299,7 +313,7 @@ impl 棱镜 {
                     .into());
                 }
             };
-            元素序列[i] = (元素, 位置);
+            元素序列[i] = 元素 + 位置 * self.元素总数();
         }
         return Ok(元素序列);
     }
@@ -322,7 +336,7 @@ impl 棱镜 {
             for 原始元素序列字符串 in 元素序列.split('　') {
                 let 元素序列 =
                     self.预处理元素序列(&词, &原始元素序列字符串.to_string(), 最大码长)?;
-                let 位图 = 位图::从元素序列创建(&元素序列);
+                let 位图 = 位图::从元素序列创建(&元素序列, self);
                 全部元素序列.push((元素序列, 位图));
             }
             let c = 可编码对象 {

@@ -7,7 +7,7 @@ use crate::{最大元素编码长度, 棱镜, 错误};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::iter::zip;
 
-pub type 线性化决策 = Vec<[键; 最大元素编码长度]>;
+pub type 线性化决策 = Vec<键>;
 
 #[derive(Clone)]
 pub struct 编码空间 {
@@ -129,15 +129,13 @@ impl 默认编码器 {
             哈希表: FxHashMap::default(),
         };
         let 简码空间 = 全码空间.clone();
-        let mut 包含元素的词 = vec![];
-        for _ in 0..=上下文.棱镜.元素转数字.len() {
-            包含元素的词.push(vec![]);
-        }
+        let mut 包含元素的词 = vec![vec![]; 上下文.棱镜.元素总数()];
         for (词序号, 词) in 词信息.iter().enumerate() {
             let mut 词元素集合 = FxHashSet::default();
             for (元素序列, _) in &词.全部元素序列 {
-                for (元素, _) in 元素序列 {
-                    词元素集合.insert(*元素);
+                for 元素位 in 元素序列 {
+                    let 元素 = *元素位 % 上下文.棱镜.元素总数(); // 取模得到元素编号，位置不影响元素集合
+                    词元素集合.insert(元素);
                 }
             }
             for 元素 in 词元素集合 {
@@ -170,9 +168,10 @@ impl 默认编码器 {
 
     fn 刷新元素序列表(&mut self, 映射: &线性化决策) {
         let mut 位图 = 位图::new();
-        for (i, 键位) in 映射.iter().enumerate() {
-            if *键位 != [0; 最大元素编码长度] {
-                位图.insert(i);
+        for (元素位, 键位) in 映射.iter().enumerate() {
+            let 元素 = 元素位 % self.棱镜.元素总数(); // 取模得到元素编号，位置不影响位图
+            if *键位 != 0 {
+                位图.insert(元素);
             }
         }
         for 词信息 in &mut self.词信息 {
@@ -200,12 +199,11 @@ impl 默认编码器 {
                     let 词 = &self.词信息[*索引];
                     let 全码信息 = &mut 编码结果[*索引].全码;
                     let mut 原始编码 = 0;
-                    for ((元素, 位置), 乘数) in zip(&词.元素序列, &编码配置.乘数列表)
-                    {
-                        if *元素 == 0 {
+                    for (元素位, 乘数) in zip(&词.元素序列, &编码配置.乘数列表) {
+                        if *元素位 == 0 {
                             break;
                         }
-                        原始编码 += 映射[*元素][*位置] * 乘数;
+                        原始编码 += 映射[*元素位] * 乘数;
                     }
                     全码信息.原始编码 = 原始编码;
                 }
@@ -214,12 +212,11 @@ impl 默认编码器 {
             for (词, 编码信息) in zip(&self.词信息, 编码结果.iter_mut()) {
                 let 全码信息 = &mut 编码信息.全码;
                 let mut 原始编码 = 0;
-                for ((元素, 位置), 乘数) in zip(&词.元素序列, &编码配置.乘数列表)
-                {
-                    if *元素 == 0 {
+                for (元素位, 乘数) in zip(&词.元素序列, &编码配置.乘数列表) {
+                    if *元素位 == 0 {
                         break;
                     }
-                    原始编码 += 映射[*元素][*位置] * 乘数;
+                    原始编码 += 映射[*元素位] * 乘数;
                 }
                 全码信息.原始编码 = 原始编码;
             }
@@ -233,7 +230,7 @@ impl 默认编码器 {
             self.全码空间.添加(全码信息.原始编码);
             // 然后生成实际编码，并向全码信息中写入实际编码和实际编码是否重码的信息，用于测评
             // 注意：对于全码来说，暂且忽略次选及之后的选择键的影响，统一视为首选进行编码。这可以避免在四码类方案中大量出现五码的编码，影响性能
-            let 乘数 = 编码配置.乘数列表[词.元素序列.iter().position(|x| x.0 == 0).unwrap_or(0)];
+            let 乘数 = 编码配置.乘数列表[词.元素序列.iter().position(|x| *x == 0).unwrap_or(0)];
             let 编码 = 编码配置.生成编码(全码信息.原始编码, 0, 乘数);
             let 是否重码 = 原始编码候选位置 > 0;
             全码信息.更新(编码, 是否重码);
@@ -300,21 +297,39 @@ impl 默认编码器 {
         }
     }
 
-    pub fn 线性化(&self, 决策: &默认决策, 棱镜: &棱镜) -> 线性化决策 {
-        let mut result: 线性化决策 = vec![Default::default(); 决策.元素.len()];
-        for (序号, 安排) in 决策.元素.iter().enumerate() {
-            if 序号 < 棱镜.进制 as usize {
-                result[序号] = [序号 as 键, 0, 0, 0];
+    pub fn 线性化(
+        &self,
+        决策: &默认决策,
+        棱镜: &棱镜,
+        纯移动字根: &mut Option<Vec<usize>>,
+    ) -> 线性化决策 {
+        let radix = 棱镜.元素总数();
+        let mut result: 线性化决策 = vec![Default::default(); radix * 最大元素编码长度];
+        for (元素, 安排) in 决策.元素.iter().enumerate() {
+            if 元素 < 棱镜.进制 as usize {
+                result[元素] = 元素 as 键;
                 continue;
             }
             match 安排 {
-                默认安排::归并(元素) => {
-                    result[序号] = result[*元素];
+                默认安排::归并(引用元素) => {
+                    for i in 0..最大元素编码长度 {
+                        result[元素 + i * radix] = result[*引用元素 + i * radix];
+                    }
+                    if let Some(纯移动字根) = 纯移动字根 {
+                        if 纯移动字根.contains(引用元素) {
+                            纯移动字根.push(元素);
+                        }
+                    }
                     continue;
                 }
                 默认安排::键位(列表) => {
-                    for (i, (元素, 位置)) in 列表.iter().enumerate() {
-                        result[序号][i] = result[*元素][*位置];
+                    for (i, (引用元素, 位置)) in 列表.iter().enumerate() {
+                        result[元素 + i * radix] = result[*引用元素 + *位置 * radix];
+                        if let Some(纯移动字根) = 纯移动字根 {
+                            if 纯移动字根.contains(引用元素) {
+                                纯移动字根.push(元素);
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -330,8 +345,7 @@ impl 编码器 for 默认编码器 {
         &mut self, 决策: &默认决策, 决策变化: &Option<默认决策变化>, 输出: &mut [编码信息]
     ) {
         self.重置();
-        let 线性化决策 = self.线性化(决策, &self.棱镜);
-        let 纯移动字根 = if let Some(变化) = 决策变化 {
+        let mut 纯移动字根 = if let Some(变化) = 决策变化 {
             if 变化.增加元素.is_empty() && 变化.减少元素.is_empty() {
                 Some(变化.移动元素.clone())
             } else {
@@ -340,11 +354,11 @@ impl 编码器 for 默认编码器 {
         } else {
             None
         };
-        if let Some(_) = 纯移动字根 {
-        } else {
+        let 线性化决策 = self.线性化(决策, &self.棱镜, &mut 纯移动字根);
+        if 纯移动字根.is_none() {
             self.刷新元素序列表(&线性化决策);
         }
-        self.输出全码(&线性化决策, &None, 输出);
+        self.输出全码(&线性化决策, &纯移动字根, 输出);
         if self.编码配置.简码配置列表.is_none()
             || self.编码配置.简码配置列表.as_ref().unwrap().is_empty()
         {

@@ -134,3 +134,74 @@ jobs:
           name: macos
           path: |
             target/universal2-apple-darwin/release/chai
+
+  bench:
+    name: Benchmark
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Fetch Static Resources (non-Windows)
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: |
+          chmod +x fetch.sh
+          ./fetch.sh
+
+      - name: Fetch Static Resources (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          .\fetch.ps1
+
+      - name: Run cargo bench and save output
+        # Use bash on all runners so we can tee output consistently
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Running cargo bench on $(uname -s)"
+          # Run benches and capture both stdout and exit code
+          cargo bench --all-targets 2>&1 | tee bench-output.txt || true
+          # Record the cargo exit status (first command in the pipe)
+          echo "CARGO_EXIT=${PIPESTATUS[0]}" >> bench-output.txt
+
+      - name: Write short summary to job summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## cargo bench — ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # include the first 200 lines of output for quick glance
+          head -n 200 bench-output.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark output artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench-output.txt
+
+      - name: Comment PR with brief bench summary (only on PR events)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs')
+            const out = fs.existsSync('bench-output.txt') ? fs.readFileSync('bench-output.txt','utf8').split('\n').slice(0,120).join('\n') : 'no output'
+            const body = `Benchmark results for ${process.env.RUNNER_OS} (short):\n\n` + '```\n' + out + '\n```\n\nFull output is attached as an artifact.'
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            })
