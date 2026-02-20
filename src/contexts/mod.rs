@@ -33,12 +33,12 @@ pub fn 合并初始决策(
     原始决策空间: &mut IndexMap<String, Vec<安排描述>>,
     原始决策: &mut IndexMap<String, 安排>,
 ) {
+    // 确保每个元素在决策和决策空间中都有对应项
     for 元素名称 in 原始决策.keys() {
         if !原始决策空间.contains_key(元素名称) {
             原始决策空间.insert(元素名称.clone(), vec![]);
         }
     }
-    // 移除多余元素
     for 元素名称 in 原始决策空间.keys() {
         if !原始决策.contains_key(元素名称) {
             原始决策.insert(元素名称.clone(), 安排::Unused(()));

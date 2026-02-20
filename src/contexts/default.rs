@@ -28,6 +28,7 @@ pub struct 默认上下文 {
     pub 棱镜: 棱镜,
     pub 选择键: Vec<键>,
     pub 元素图: 元素图,
+    pub 保存原始决策空间: IndexMap<String, Vec<安排描述>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,13 +202,14 @@ impl 上下文 for 默认上下文 {
             }
         }
         新配置.form.mapping = mapping;
+        新配置.form.mapping_space = Some(self.保存原始决策空间.clone());
         to_string(&新配置).unwrap()
     }
 }
 
 impl 默认上下文 {
     pub fn 新建(输入: 默认输入) -> Result<Self, 错误> {
-        let (初始决策, 决策空间, 元素图, 选择键, 棱镜) =
+        let (初始决策, 决策空间, 元素图, 选择键, 棱镜, 保存原始决策空间) =
             Self::构建棱镜和初始决策(&输入.配置)?;
         let 最大码长 = 输入.配置.encoder.max_length;
         let 词列表 = 棱镜.预处理词列表(输入.词列表, 最大码长)?;
@@ -221,12 +223,13 @@ impl 默认上下文 {
             选择键,
             决策空间,
             元素图,
+            保存原始决策空间,
         })
     }
 
     pub fn 构建棱镜和初始决策(
         配置: &配置,
-    ) -> Result<(默认决策, 默认决策空间, 元素图, Vec<键>, 棱镜), 错误> {
+    ) -> Result<(默认决策, 默认决策空间, 元素图, Vec<键>, 棱镜, IndexMap<String, Vec<安排描述>>), 错误> {
         // 1. 构建初始决策和决策空间
         let mut 原始决策 = 配置.form.mapping.clone();
         let mut 原始决策空间 = 配置.form.mapping_space.clone().unwrap_or_default();
@@ -234,6 +237,8 @@ impl 默认上下文 {
         let 原始生成器列表 = 配置.form.mapping_generators.clone().unwrap_or_default();
         // 合并初始决策
         合并初始决策(&mut 原始决策空间, &mut 原始决策);
+        // 在合并之后克隆一份原始决策空间，以便后续使用
+        let 保存原始决策空间 = 原始决策空间.clone();
         // 应用生成器
         应用生成器(&mut 原始决策空间, &原始生成器列表);
         // 展开变量
@@ -292,7 +297,7 @@ impl 默认上下文 {
             &原始决策空间,
             &原始元素图,
         )?;
-        Ok((初始决策, 决策空间, 元素图, 选择键, 棱镜))
+        Ok((初始决策, 决策空间, 元素图, 选择键, 棱镜, 保存原始决策空间))
     }
 
     pub fn 构建初始决策和决策空间(
