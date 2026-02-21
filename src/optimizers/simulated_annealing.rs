@@ -35,11 +35,12 @@ impl 退火方法 {
         操作: &mut F,
         上下文: &C,
         界面: &dyn 界面,
+        恢复步数: Option<usize>,
     ) -> 优化结果<O> {
         let 降温时间表 = self
             .parameters
             .unwrap_or_else(|| self.调参(初始决策, 目标函数, 操作, 界面));
-        self.solve_with(初始决策, 目标函数, 操作, 上下文, 降温时间表, 界面)
+        self.solve_with(初始决策, 目标函数, 操作, 上下文, 降温时间表, 界面, 恢复步数)
     }
 
     /// 退火算法求决策的主函数
@@ -51,6 +52,7 @@ impl 退火方法 {
         上下文: &C,
         降温时间表: 降温时间表,
         界面: &dyn 界面,
+        恢复步数: Option<usize>,
     ) -> 优化结果<O> {
         let mut 最优决策 = 初始决策.clone();
         let mut 最优指标 = 目标函数.计算(&最优决策, &None);
@@ -63,24 +65,38 @@ impl 退火方法 {
         } = 降温时间表;
         let 开始时间 = Instant::now();
         let 更新频率 = self.update_interval.unwrap_or(1000);
+        let 保存进度 = self.report_after.unwrap_or(0.9);
         let mut 上一个变化 = None;
+        let mut 输出过最优解的数量 = 0;
+        let 起始步数 = 恢复步数.unwrap_or(0);
 
-        for 步骤 in 0..总步数 {
+        for 步骤 in 起始步数..总步数 {
             // 等比级数降温：每一步的温度都是上一步的温度乘以一个固定倍数
             let 进度 = 步骤 as f64 / 总步数 as f64;
             let 温度 = 最高温 * (最低温 / 最高温).powf(进度);
             // 每过一定的步数，报告当前状态和计算速度
-            if 步骤 % 更新频率 == 0 || 步骤 == 总步数 - 1 {
+            if 步骤 % 更新频率 == 0 {
                 界面.发送(消息::Progress {
                     steps: 步骤,
                     temperature: 温度,
                     metric: format!("{}", 当前指标.0),
                     score: 当前指标.1,
+                    config: 上下文.序列化(&当前决策),
                 });
                 if 步骤 == 更新频率 {
                     let elapsed = 开始时间.elapsed().as_micros() as u64 / 更新频率 as u64;
                     界面.发送(消息::Elapsed { time: elapsed });
                 }
+            }
+            // 如果已经达到保存进度且没有输出过最优解，强制输出最优解一次
+            if 进度 >= 保存进度 && 输出过最优解的数量 == 0 {
+                界面.发送(消息::BetterSolution {
+                    metric: format!("{}", 最优指标.0),
+                    score: 最优指标.1,
+                    config: 上下文.序列化(&最优决策),
+                    index: Some(0),
+                });
+                输出过最优解的数量 += 1;
             }
             // 生成一个新决策
             let mut 尝试决策 = 当前决策.clone();
@@ -104,23 +120,31 @@ impl 退火方法 {
             if 当前指标.1 < 最优指标.1 {
                 最优指标 = 当前指标.clone();
                 最优决策.clone_from(&当前决策);
-                let 是否保存 = 进度 > self.report_after.unwrap_or(0.9);
+                let 是否保存 = 进度 > 保存进度;
                 界面.发送(消息::BetterSolution {
                     metric: format!("{}", 最优指标.0),
                     score: 最优指标.1,
                     config: 上下文.序列化(&最优决策),
-                    save: 是否保存,
-                })
+                    index: if 是否保存 {
+                        Some(输出过最优解的数量)
+                    } else {
+                        None
+                    },
+                });
+                if 是否保存 {
+                    输出过最优解的数量 += 1;
+                }
             }
         }
-        界面.发送(消息::BetterSolution {
-            metric: format!("{}", 最优指标.0),
-            score: 最优指标.1,
-            config: 上下文.序列化(&最优决策),
-            save: true,
+        界面.发送(消息::Progress {
+            steps: 总步数,
+            temperature: 最低温,
+            metric: format!("{}", 当前指标.0),
+            config: 上下文.序列化(&当前决策),
+            score: 当前指标.1,
         });
         优化结果 {
-            映射: 最优决策,
+            配置文件: 上下文.序列化(&最优决策),
             指标: 最优指标.0.clone(),
             分数: 最优指标.1,
         }

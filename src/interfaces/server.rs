@@ -67,7 +67,7 @@ impl WebApi {
         let mut 目标函数 = 默认目标函数::新建(&上下文, 编码器)?;
         let mut 操作 = 默认操作::新建(&上下文)?;
         let 求解器配置::SimulatedAnnealing(退火) = 优化方法配置;
-        退火.优化(&上下文.初始决策, &mut 目标函数, &mut 操作, &上下文, self);
+        退火.优化(&上下文.初始决策, &mut 目标函数, &mut 操作, &上下文, self, None);
         Ok(())
     }
 }

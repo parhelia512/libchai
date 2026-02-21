@@ -22,6 +22,7 @@ pub fn 读取(name: &str) -> 默认上下文 {
                 pair_equivalence: None,
             },
             threads: 1,
+            resume_from: None,
         },
     };
     let 输入 = 从命令行参数创建(&参数);

@@ -55,15 +55,15 @@ impl Web {
         Ok(to_value(&(码表, 指标))?)
     }
 
-    pub fn optimize(&self) -> Result<(), JsError> {
+    pub fn optimize(&self) -> Result<JsValue, JsError> {
         let 优化方法配置 = self.参数.配置.clone().optimization.unwrap().metaheuristic.unwrap();
         let 上下文 = 默认上下文::新建(self.参数.clone())?;
         let 编码器 = 默认编码器::新建(&上下文)?;
         let mut 目标函数 = 默认目标函数::新建(&上下文, 编码器)?;
         let mut 操作 = 默认操作::新建(&上下文)?;
         let 求解器配置::SimulatedAnnealing(退火) = 优化方法配置;
-        退火.优化(&上下文.初始决策, &mut 目标函数, &mut 操作, &上下文, self);
-        Ok(())
+        let 优化结果 = 退火.优化(&上下文.初始决策, &mut 目标函数, &mut 操作, &上下文, self, None);
+        Ok(to_value(&优化结果)?)
     }
 }
 

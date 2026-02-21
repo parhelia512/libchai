@@ -1,6 +1,6 @@
 //! 数据结构的定义
 
-use crate::config::{安排, 安排描述, 广义码位, 简码模式, 简码规则, 配置};
+use crate::config::{基本信息, 安排, 安排描述, 广义码位, 简码模式, 简码规则, 配置};
 use crate::contexts::{
     上下文, 合并初始决策, 展开变量, 应用生成器, 拓扑排序, 条件, 条件安排
 };
@@ -8,7 +8,7 @@ use crate::encoders::default::简码数量;
 use crate::interfaces::默认输入;
 use crate::optimizers::决策;
 use crate::{
-    元素, 元素图, 原始当量信息, 原始键位分布信息, 可编码对象, 最大元素数量, 最大按键组合长度, 最大词长, 棱镜, 码表项, 编码, 编码信息, 键
+    formatted_local_now, 元素, 元素图, 原始当量信息, 原始键位分布信息, 可编码对象, 最大元素数量, 最大按键组合长度, 最大词长, 棱镜, 码表项, 编码, 编码信息, 键
 };
 use crate::{最大元素编码长度, 错误};
 use indexmap::IndexMap;
@@ -190,6 +190,14 @@ impl 上下文 for 默认上下文 {
     type 决策 = 默认决策;
     fn 序列化(&self, 决策: &Self::决策) -> String {
         let mut 新配置 = self.配置.clone();
+        let mut info = 新配置.info.clone().unwrap_or(基本信息 {
+            name: None,
+            description: None,
+            version: None,
+            author: None,
+        });
+        info.version = Some(formatted_local_now());
+        新配置.info = Some(info);
         let mut mapping = IndexMap::new();
         for (i, 安排) in 决策.元素.iter().enumerate() {
             if i < self.棱镜.进制 as usize {

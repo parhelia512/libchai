@@ -1,6 +1,8 @@
 //! 优化方法接口，以及若干优化方法的实现
 //!
 
+use serde::{Deserialize, Serialize};
+
 use crate::objectives::目标函数;
 pub mod genetic;
 pub mod simulated_annealing;
@@ -33,8 +35,9 @@ pub trait 决策: Clone {
     fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化;
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct 优化结果<O: 目标函数> {
-    pub 映射: O::决策,
+    pub 配置文件: String,
     pub 指标: O::目标值,
     pub 分数: f64,
 }

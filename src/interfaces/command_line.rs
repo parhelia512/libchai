@@ -1,12 +1,16 @@
 use crate::config::配置;
 use crate::interfaces::{消息, 界面, 默认输入};
-use crate::{原始可编码对象, 原始当量信息, 原始键位分布信息, 码表项};
+use crate::objectives::目标函数;
+use crate::optimizers::优化结果;
+use crate::{
+    原始可编码对象, 原始当量信息, 原始键位分布信息, 码表项, 错误
+};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use csv::{ReaderBuilder, WriterBuilder};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use std::fs::{create_dir_all, read_to_string, write, OpenOptions};
+use std::fs::{create_dir_all, read_dir, read_to_string, write, File, OpenOptions};
 use std::io::Write;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
@@ -53,7 +57,7 @@ pub struct 数据参数 {
 /// 命令行中所有可用的子命令
 #[derive(Subcommand, Clone)]
 pub enum 命令 {
-    #[command(about = "使用方案文件和拆分表计算出字词编码并统计各类评测指标")]
+    #[command(about = "使用方案文件和拆分表计算出字词编码并统计各类指标")]
     Encode {
         #[command(flatten)]
         data: 数据参数,
@@ -65,6 +69,10 @@ pub enum 命令 {
         /// 优化时使用的线程数
         #[arg(short, long, default_value = "1")]
         threads: usize,
+        /// 是否要从某个输出目录恢复
+        /// 如果指定了这个参数，程序会在该目录寻找 checkpoint-*.yaml 来恢复优化进度
+        #[arg(short, long)]
+        resume_from: Option<PathBuf>,
     },
     /// 启动 Web API 服务器
     #[command(about = "启动 HTTP API 服务器")]
@@ -76,6 +84,7 @@ pub enum 命令 {
 }
 
 /// 通过命令行来使用 libchai 的入口，实现了界面特征
+#[derive(Debug, Clone)]
 pub struct 命令行<P: 命令行参数> {
     pub 参数: P,
     pub 输出目录: PathBuf,
@@ -108,8 +117,8 @@ impl<P: 命令行参数> 命令行<P> {
         }
     }
 
-    pub fn 输出编码结果(&self, entries: Vec<码表项>) {
-        let path = self.输出目录.join("编码.txt");
+    pub fn 输出编码结果(&self, entries: Vec<码表项>) -> PathBuf {
+        let path = self.输出目录.join("code.txt");
         let mut writer = WriterBuilder::new()
             .delimiter(b'\t')
             .has_headers(false)
@@ -128,17 +137,44 @@ impl<P: 命令行参数> 命令行<P> {
                 .unwrap();
         }
         writer.flush().unwrap();
-        println!("已完成编码，结果保存在 {} 中", path.clone().display());
+        return path;
     }
 
-    pub fn 输出评测指标<M: Display + Serialize>(&self, metric: M, score: f64) {
-        let path = self.输出目录.join("评测指标.yaml");
-        print!("分数：{score:.4e}；指标：{metric}");
-        let metric_str = serde_yaml::to_string(&metric).unwrap();
+    pub fn 输出指标<M: Display + Serialize>(&self, metric: &M, score: f64) -> PathBuf {
+        let path = self.输出目录.join("metric.txt");
+        let metric_str = format!("分数：{score:.4e}；{metric}");
         write(&path, metric_str).unwrap();
+        return path;
+    }
+
+    pub fn 输出总结<O: 目标函数>(
+        &self,
+        results: &Vec<(usize, 优化结果<O>, Self)>,
+    ) -> PathBuf {
+        let path = self.输出目录.join("summary.txt");
+        let mut f = File::create(&path).unwrap();
+        for (index, result, _) in results {
+            write!(
+                &mut f,
+                "线程 {index} 分数：{:.4e}；{}",
+                result.分数, result.指标
+            )
+            .unwrap();
+        }
+        f.flush().unwrap();
+        return path;
+    }
+
+    pub fn 输出配置文件(&self, 配置内容: &str) -> PathBuf {
+        let path = self.输出目录.join("config.yaml");
+        write(&path, 配置内容).unwrap();
+        return path;
     }
 
     pub fn 生成子命令行(&self, index: usize) -> 命令行<P> {
+        if !self.参数.是否为多线程() {
+            return self.clone();
+        }
         let child_dir = self.输出目录.join(format!("{index}"));
         命令行::新建(self.参数.clone(), Some(child_dir))
     }
@@ -213,39 +249,87 @@ impl<P: 命令行参数> 界面 for 命令行<P> {
             消息::Progress {
                 steps,
                 temperature,
+                config,
                 metric,
                 score,
-            } => writeln!(
-                &mut writer,
-                "已执行 {steps} 步，当前温度为 {temperature:.2e}，当前目标函数值为 {score:.4e}，当前评测指标如下：\n{metric}",
-            ),
+            } => {
+                let 配置文件名 = format!("checkpoint-{steps}.yaml");
+                let 配置路径 = self.输出目录.join(&配置文件名);
+                write(&配置路径, config).unwrap();
+                writeln!(
+                    &mut writer,
+                    "已执行 {steps} 步，当前温度 {temperature:.2e}，当前分数 {score:.4e}，当前指标如下：\n{metric}",
+                )
+            }
             消息::BetterSolution {
                 metric,
                 score,
                 config,
-                save,
+                index,
             } => {
-                let 时刻 = Local::now();
-                let 时间戳 = 时刻.format("%m-%d+%H_%M_%S_%3f").to_string();
-                let 配置路径 = self.输出目录.join(format!("{时间戳}.yaml"));
-                let 指标路径 = self.输出目录.join(format!("{时间戳}.txt"));
-                if save {
-                    write(指标路径, metric.clone()).unwrap();
-                    write(配置路径, config).unwrap();
+                if let Some(index) = index {
+                    let 配置文件名 = format!("solution-{index}.yaml");
+                    let 配置路径 = self.输出目录.join(&配置文件名);
+                    let 指标文件名 = format!("solution-{index}.txt");
+                    let 指标路径 = self.输出目录.join(&指标文件名);
                     writeln!(
                         &mut writer,
-                        "方案文件保存于 {时间戳}.yaml 中，目标函数值为 {score:.4e}，评测指标保存于 {时间戳}.metric.yaml 中",
+                        "方案文件保存于 {}，指标保存于 {}",
+                        配置路径.display(),
+                        指标路径.display()
                     )
                     .unwrap();
+                    write(指标路径, metric.clone()).unwrap();
+                    write(配置路径, config).unwrap();
                 }
                 writeln!(
                     &mut writer,
-                    "{} 系统搜索到了一个更好的方案，目标函数值为 {score:.4e}，评测指标如下：\n{}",
-                    时刻.format("%H:%M:%S"),
-                    metric
+                    "系统搜索到了一个更好的方案，分数为 {score:.4e}，指标如下：\n{metric}"
                 )
             }
         };
         result.unwrap()
     }
+}
+
+pub fn 从目录恢复(目录: &PathBuf, 线程数: usize) -> Result<Vec<(usize, 配置)>, 错误> {
+    let mut 存档列表 = vec![None; 线程数];
+    let mut 目录列表 = vec![];
+    if 线程数 == 1 {
+        目录列表.push(目录.clone());
+    } else {
+        for i in 0..线程数 {
+            目录列表.push(目录.join(i.to_string()));
+        }
+    }
+    for (i, 子目录) in 目录列表.iter().enumerate() {
+        let 存档 = &mut 存档列表[i];
+        for entry in read_dir(子目录)? {
+            let entry = entry?;
+            let file_name_raw = entry.file_name();
+            let file_name = file_name_raw.to_str().ok_or("文件名不是有效的 UTF-8")?;
+            if file_name.starts_with("checkpoint-") && file_name.ends_with(".yaml") {
+                let step_str = &file_name["checkpoint-".len()..file_name.len() - ".yaml".len()];
+                if let Ok(step) = step_str.parse::<usize>() {
+                    if let Some((current_step, _)) = 存档 {
+                        if step <= *current_step {
+                            continue; // 已经有更大的 step 了，跳过这个文件
+                        }
+                    }
+                    *存档 = Some((step, entry.path()));
+                }
+            }
+        }
+    }
+    let mut 结果 = vec![];
+    for (i, checkpoint) in 存档列表.iter().enumerate() {
+        if let Some((step, path)) = checkpoint {
+            let content = read_to_string(path)?;
+            let config: 配置 = serde_yaml::from_str(&content).unwrap();
+            结果.push((*step, config));
+        } else {
+            return Err(format!("线程 {i} 没有找到 checkpoint 文件").into());
+        }
+    }
+    Ok(结果)
 }

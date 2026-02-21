@@ -27,14 +27,15 @@ pub enum 消息 {
     Progress {
         steps: usize,
         temperature: f64,
+        config: String,
         metric: String,
         score: f64,
     },
     BetterSolution {
+        index: Option<u64>,
+        config: String,
         metric: String,
         score: f64,
-        config: String,
-        save: bool,
     },
     Elapsed {
         time: u64,

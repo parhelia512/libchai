@@ -13,27 +13,81 @@
 - `assets/distribution.txt`：用指分布文件示例，每个按键一行，每行的内容为以制表符分隔的按键、目标频率、低频率惩罚系数、高频率惩罚系数；
 - `assets/equivalence.txt`：双键速度当量文件示例，每个按键组合一行，每行的内容为以制表符分隔的按键组合和当量；
 
-命令行程序基本的用法为：
+`chai` 支持三个不同的命令：`encode`、`optimize` 和 `server`，各个命令的详细介绍如下：
 
-```bash
-./chai [命令] [方案文件] -e [词信息文件]
-```
+### 编码并计算指标
 
-`chai` 支持三个不同的命令：`encode`、`optimize` 和 `server`：
-
-- `encode`：使用方案文件和拆分表计算出字词编码并统计各类评测指标
-- `optimize`：基于拆分表和方案文件中的配置优化元素布局
-- `server`：启动 Web 服务
-
-例如，您可以运行
+`encode` 命令使用方案文件和拆分表计算出字词编码并统计各类评测指标。例如，您可以运行
 
 ```bash
 ./chai encode examples/米十五笔.yaml -e examples/米十五笔.txt
+```
+
+完整介绍如下：
+
+```bash
+> ./chai encode -h
+使用方案文件和拆分表计算出字词编码并统计各类指标
+
+Usage: chai encode [OPTIONS] [CONFIG]
+
+Arguments:
+  [CONFIG]  方案文件，默认为 config.yaml
+
+Options:
+  -e, --encodables <FILE>        频率序列表，默认为 elements.txt
+  -k, --key-distribution <FILE>  单键用指分布表，默认为 assets 目录下的 distribution.txt
+  -p, --pair-equivalence <FILE>  双键速度当量表，默认为 assets 目录下的 equivalence.txt
+```
+
+### 优化
+
+`optimize` 命令基于拆分表和方案文件中的配置优化元素布局。例如，您可以运行
+
+```bash
 ./chai optimize examples/米十五笔.yaml -e examples/米十五笔.txt -t 4
+```
+
+完整介绍如下：
+
+```bash
+> ./chai optimize -h
+基于配置文件优化决策
+
+Usage: chai optimize [OPTIONS] [CONFIG]
+
+Arguments:
+  [CONFIG]  方案文件，默认为 config.yaml
+
+Options:
+  -e, --encodables <FILE>          频率序列表，默认为 elements.txt
+  -k, --key-distribution <FILE>    单键用指分布表，默认为 assets 目录下的 distribution.txt
+  -p, --pair-equivalence <FILE>    双键速度当量表，默认为 assets 目录下的 equivalence.txt
+  -t, --threads <THREADS>          优化时使用的线程数 [default: 1]
+  -r, --resume-from <RESUME_FROM>  是否要从某个输出目录恢复 如果指定了这个参数，程序会在该目录寻找 checkpoint-*.yaml 来恢复优化进度
+```
+
+在优化过程中，您可以随时停止优化并关闭终端，断点数据会保存在相应的文件夹中。若希望下一次计算从此前的某个断点继续，则需要加上 `-r` 参数。例如，上一次计算的结果在 `output-02-20+20_26_36` 中，则可以加上 `-r output-02-20+20_26_36`。值得注意的是，使用的线程数量需要和此前一致，否则无法将所有断点文件均继续计算。
+
+### 启动服务器
+
+`server` 命令​启动 Web 服务。例如，您可以运行
+
+```bash
 ./chai server -p 12345
 ```
 
-完整的使用说明可用 `./chai --help` 查看。
+完整介绍如下：
+
+```bash
+> ./chai server -h
+启动 HTTP API 服务器
+
+Usage: chai server [OPTIONS]
+
+Options:
+  -p, --port <PORT>  服务器端口号 [default: 3200]
+```
 
 ## 使用 `libchai`
 

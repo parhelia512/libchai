@@ -491,3 +491,24 @@ impl From<错误> for JsError {
         JsError::new(&value.message)
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn formatted_local_now() -> String {
+    use js_sys::Date;
+    let date = Date::new_0();
+    let month = date.get_month() as u32 + 1; // JS 月份从 0 开始
+    let day = date.get_date() as u32;
+    let hour = date.get_hours() as u32;
+    let minute = date.get_minutes() as u32;
+    let second = date.get_seconds() as u32;
+    format!(
+        "{:02}-{:02}+{:02}_{:02}_{:02}",
+        month, day, hour, minute, second
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn formatted_local_now() -> String {
+    use chrono::Local;
+    Local::now().format("%m-%d+%H_%M_%S").to_string()
+}
