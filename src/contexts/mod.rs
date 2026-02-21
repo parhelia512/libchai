@@ -224,3 +224,40 @@ pub fn 应用生成器(
         }
     }
 }
+
+pub fn 补充存在性条件(原始决策空间: &mut IndexMap<String, Vec<安排描述>>) {
+    for (_, 原始安排列表) in 原始决策空间.iter_mut() {
+        for 安排描述 in 原始安排列表.iter_mut() {
+            let mut 需要存在的元素 = FxHashSet::default();
+            match &安排描述.value {
+                安排::Grouped { element } => {
+                    需要存在的元素.insert(element.clone());
+                }
+                安排::Advanced(ref keys) => {
+                    for k in keys {
+                        if let 广义码位::Reference { element, .. } = k {
+                            需要存在的元素.insert(element.clone()); 
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if 需要存在的元素.is_empty() {
+                continue;
+            }
+            let mut condition = vec![];
+            for 元素 in &需要存在的元素 {
+                condition.push(crate::config::条件 {
+                    element: 元素.clone(),
+                    op: "不是".to_string(),
+                    value: 安排::Unused(())
+                });
+            }
+            if let Some(existing_condition) = &mut 安排描述.condition {
+                existing_condition.extend(condition);
+            } else {
+                安排描述.condition = Some(condition);
+            }
+        }
+    }
+}
